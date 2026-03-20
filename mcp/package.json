@@ -1,0 +1,27 @@
+{
+  "name": "ios-app-generator-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for generating iOS app projects from the Template-App-Generator",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "ios-app-generator-mcp": "dist/index.js",
+    "ios-app-generator-mcp-http": "dist/http.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "start:http": "node dist/http.js",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
