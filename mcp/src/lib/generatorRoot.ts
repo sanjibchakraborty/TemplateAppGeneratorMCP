@@ -59,6 +59,53 @@ function execGit(
   });
 }
 
+/**
+ * Branches whose names contain `/` are not valid as a bare `git checkout` pathspec
+ * until the remote-tracking ref exists. Use an explicit fetch refspec, then checkout
+ * `refs/remotes/origin/<ref>` (detached HEAD is fine for reading files).
+ */
+async function fetchAndCheckoutRef(dir: string, ref: string): Promise<void> {
+  const branchSpec = `refs/heads/${ref}:refs/remotes/origin/${ref}`;
+  const remoteTip = `refs/remotes/origin/${ref}`;
+
+  try {
+    await execGit(
+      "git",
+      ["-C", dir, "fetch", "--depth", "100", "origin", branchSpec],
+      { maxBuffer: 64 * 1024 * 1024 }
+    );
+    await execGit("git", ["-C", dir, "checkout", "--force", remoteTip]);
+    return;
+  } catch {
+    /* try tag */
+  }
+
+  try {
+    await execGit(
+      "git",
+      [
+        "-C",
+        dir,
+        "fetch",
+        "--depth",
+        "100",
+        "origin",
+        `refs/tags/${ref}:refs/tags/${ref}`,
+      ],
+      { maxBuffer: 64 * 1024 * 1024 }
+    );
+    await execGit("git", ["-C", dir, "checkout", "--force", `refs/tags/${ref}`]);
+    return;
+  } catch {
+    /* fall through */
+  }
+
+  await execGit("git", ["-C", dir, "fetch", "origin"], {
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  await execGit("git", ["-C", dir, "checkout", "--force", ref]);
+}
+
 async function syncGitClone(url: string, ref: string, dir: string): Promise<void> {
   const cacheBase = getCacheBaseDir();
   await mkdir(cacheBase, { recursive: true });
@@ -74,25 +121,15 @@ async function syncGitClone(url: string, ref: string, dir: string): Promise<void
         maxBuffer: 64 * 1024 * 1024,
       });
     } catch {
-      await execGit("git", ["clone", url, dir], { maxBuffer: 64 * 1024 * 1024 });
-      await execGit("git", ["-C", dir, "checkout", ref]);
+      await execGit("git", ["clone", "--depth", "1", url, dir], {
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      await fetchAndCheckoutRef(dir, ref);
     }
     return;
   }
 
-  try {
-    await execGit("git", ["-C", dir, "fetch", "--depth", "100", "origin", ref], {
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    await execGit("git", ["-C", dir, "checkout", ref]);
-    await execGit("git", ["-C", dir, "merge", "--ff-only", "FETCH_HEAD"]);
-  } catch {
-    await execGit("git", ["-C", dir, "fetch", "origin"], {
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    await execGit("git", ["-C", dir, "checkout", ref]);
-    await execGit("git", ["-C", dir, "pull", "--ff-only", "origin", ref]);
-  }
+  await fetchAndCheckoutRef(dir, ref);
 }
 
 function generatorResolutionError(): Error {

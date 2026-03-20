@@ -1,229 +1,79 @@
 # iOS App Generator — MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that exposes the **Template-App-Generator-iOS** system as tools any MCP-compatible AI client can call.
+[MCP](https://modelcontextprotocol.io) server for the iOS generator: loads contracts from the generator repo and returns prompts for **`ios_project_wizard`** / **`list_ios_modules`**.
 
-## How It Works
+**Needs:** Node.js 18+, Git on `PATH` if you use `IOS_GENERATOR_REPO_URL`.
 
-The server reads the contract markdown files living in `resources/TemplateApp/docs/` and composes them into a structured generation prompt. The connected LLM agent executes the prompt step-by-step to produce a complete Xcode project under `output/{AppName}/`.
+---
+
+## How it works
+
+The server reads contract markdown under **`resources/TemplateApp/docs/`** in the generator repo, resolves the execution plan from the wizard spec, and assembles one structured **generation prompt**. The AI client runs that prompt in the workspace and scaffolds the Xcode project under **`output/{AppName}/`**.
 
 ```
-Client (Cursor / Claude Desktop / etc.)
-  ↓ calls create_ios_app(appName, bundleId, architecture, modules)
-MCP Server
-  ↓ validates input, resolves execution plan, loads contracts
-  ↓ returns assembled prompt
-LLM Agent
-  ↓ executes contracts in order
-output/{AppName}/   ← fully scaffolded Xcode project
+Cursor (or another MCP client)
+  → calls ios_project_wizard (and optionally list_ios_modules)
+MCP server
+  → validates input, loads contracts in order, returns the full prompt
+AI agent
+  → executes each contract step in the workspace
+output/{AppName}/   ← generated app
 ```
 
 ---
 
-## Prerequisites
+## Install
 
-- Node.js ≥ 18
-- [Git](https://git-scm.com/) on `PATH` (only if you use `IOS_GENERATOR_REPO_URL` cloning)
-- A way to point the server at the **generator** repo (see below)
+1. Clone this repo and go to the `mcp` folder (where `package.json` is).
 
-### Generator repo resolution (in order)
+   ```bash
+   cd mcp
+   npm install
+   npm run build
+   ```
 
-1. **`IOS_GENERATOR_ROOT`** — absolute path to an existing clone. No Git clone is performed.
-2. **`IOS_GENERATOR_REPO_URL`** — remote or `file:///...` URL. The server clones or updates into:
-   - `$XDG_CACHE_HOME/ios-app-generator/repo`, or  
-   - `~/.cache/ios-app-generator/repo` when `XDG_CACHE_HOME` is unset.
-3. **Monorepo fallback** — if the MCP package still lives under `mcp/` inside the generator repo, that repo root is detected automatically (`resources/TemplateApp/docs` must exist).
+2. Add the server to **`~/.cursor/mcp.json`** with **`url`** and **`env`** (same shape you use in Cursor). The name under `mcpServers` must be **`ios-app-generator`** so `npm run start:http` can find this block.
 
-Optional: **`IOS_GENERATOR_REF`** — branch or tag for clone/fetch (default: `main`).
+   ```json
+   {
+     "mcpServers": {
+       "ios-app-generator": {
+         "url": "http://127.0.0.1:3846/mcp",
+         "env": {
+           "IOS_GENERATOR_REPO_URL": "https://github.com/your-org/your-generator-repo.git",
+           "IOS_GENERATOR_REF": "main"
+         }
+       }
+     }
+   }
+   ```
 
-After you move this package to its own repo, set **`IOS_GENERATOR_ROOT`** or **`IOS_GENERATOR_REPO_URL`** in the environment (Cursor `mcp.json` env block, shell profile, or `launchd` plist).
+   - **`IOS_GENERATOR_REF`** — branch or tag; slashes are OK (e.g. `Sanjib/MCP-Wizard-Generator-Repo-Clone`).
+   - Instead of cloning, you can set **`IOS_GENERATOR_ROOT`** to an absolute path to a local generator checkout (omit **`IOS_GENERATOR_REPO_URL`**).
+
+3. Start the server (reads **`env`** from that `mcp.json` via `scripts/start-http.mjs`):
+
+   ```bash
+   npm run start:http
+   ```
+
+4. Reload MCP in Cursor. Keep this terminal running while you use Cursor.
+
+**Other port:** `PORT=4000 npm run start:http`  
+**Health:** `http://127.0.0.1:3846/health`  
+**Bad clone / cache:** `rm -rf ~/.cache/ios-app-generator/repo` and start again.
 
 ---
 
-## Setup
+## Stdio (optional)
+
+If you prefer Cursor to start Node for you, use **`command`** + **`args`** pointing at **`dist/index.js`** and the same **`env`** block; then you don’t run `start:http`.
+
+---
+
+## Dev
 
 ```bash
-cd mcp
-npm install
 npm run build
-```
-
----
-
-## Two Ways to Run
-
-### Option A — HTTP server (recommended, like Figma Desktop)
-
-Start the server once, keep it running, and any MCP client connects via URL:
-
-```bash
-# Default port 3846
-npm run start:http
-
-# Custom port
-PORT=4000 npm run start:http
-```
-
-**Registering with Cursor** (`~/.cursor/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "ios-app-generator": {
-      "url": "http://127.0.0.1:3846/mcp",
-      "env": {
-        "IOS_GENERATOR_REPO_URL": "https://github.com/your-org/Template-App-Generator-iOS.git",
-        "IOS_GENERATOR_REF": "main"
-      }
-    }
-  }
-}
-```
-
-Omit `env` when using the monorepo layout; add it once the MCP lives in a separate repo. For HTTP transport, clients often cannot inject env into the server process—export `IOS_GENERATOR_*` in the shell (or plist) that runs `npm run start:http` instead.
-
-**Registering with Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "ios-app-generator": {
-      "url": "http://127.0.0.1:3846/mcp"
-    }
-  }
-}
-```
-
-Health check endpoint: `http://127.0.0.1:3846/health`
-
----
-
-### Option B — stdio (Cursor/Claude Desktop launches it per-session)
-
-No server to manage — the client starts and stops the process automatically.
-
-**Cursor / Claude Desktop config:**
-
-```json
-{
-  "mcpServers": {
-    "ios-app-generator": {
-      "command": "node",
-      "args": ["/absolute/path/to/Template-App-Generator-iOS/mcp/dist/index.js"],
-      "env": {
-        "IOS_GENERATOR_REPO_URL": "https://github.com/your-org/Template-App-Generator-iOS.git",
-        "IOS_GENERATOR_REF": "main"
-      }
-    }
-  }
-}
-```
-
-Use `IOS_GENERATOR_ROOT` instead of `IOS_GENERATOR_REPO_URL` if you already have a local clone.
-
----
-
-## Running as a Background Service (optional)
-
-To keep the HTTP server always running on login, use a `launchd` plist (macOS):
-
-```bash
-# Create ~/Library/LaunchAgents/com.ios-app-generator.mcp.plist
-# Then: launchctl load ~/Library/LaunchAgents/com.ios-app-generator.mcp.plist
-```
-
-Or simply run `npm run start:http` in a persistent terminal session.
-
----
-
-## Available Tools
-
-### `list_ios_modules`
-
-Lists all available modules grouped by type (catalog / service / structural).
-
-**No parameters.**
-
-```
-→ Returns a formatted list of all 14 modules with descriptions and keys.
-```
-
----
-
-### `create_ios_app`
-
-Generates a complete iOS app project.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `appName` | string | ✅ | PascalCase app name (e.g. `MyApp`, `CardGame`) |
-| `bundleId` | string | ✅ | Reverse-domain bundle ID (e.g. `com.company.myapp`) |
-| `architecture` | enum | ✅ | `MVVM+Builder+Router` \| `VIPER` \| `CleanArchitecture` |
-| `modules` | string[] | — | Module keys to include (default: `[]`) |
-
-**Example call:**
-
-```json
-{
-  "appName": "FinanceApp",
-  "bundleId": "com.company.financeapp",
-  "architecture": "MVVM+Builder+Router",
-  "modules": ["Logger", "Network", "Keychain", "AppTab"]
-}
-```
-
-**Returns:** A generation prompt with:
-- Resolved project spec and execution plan
-- All contracts concatenated in the correct order
-- Critical constraints injected per the module selection
-
----
-
-## Module Keys
-
-| Key | Type | Description |
-|---|---|---|
-| `CTWalletKit` | catalog | Apple Wallet (PassKit) integration |
-| `Kingfisher` | catalog | Remote image loading and caching |
-| `CTPlayerKit` | catalog | Video Player Kit |
-| `Analytics` | service | YAnalytics + Firebase |
-| `TemplateUIPackage` | catalog | CTAlertView, CTBottomSheetView, CTCarouselView, CTSnackBarView, CTToastView |
-| `CTSlidingContainerView` | catalog | Sidebar/drawer navigation |
-| `CTSocialLoginKit` | service | Social sign-in |
-| `Keychain` | service | Secure string storage |
-| `Logger` | service | Leveled logging |
-| `Network` | service | Alamofire + connectivity |
-| `SwiftData` | service | Apple-native persistence (iOS 17+) |
-| `LocationManager` | service | CoreLocation |
-| `NotificationManager` | service | Push + local notifications |
-| `AppTab` | structural | TabView dashboard root |
-
----
-
-## Module Selection Logic
-
-The server enforces all rules automatically:
-
-| Selection | App Root | Notes |
-|---|---|---|
-| No modules | `HomeScreen` | Minimal app |
-| Any catalog module | `CatalogScreen` | Catalog feature becomes root |
-| AppTab | `DashboardScreen` | TabView wraps Home/Catalog |
-| AppTab + CTWalletKit/Kingfisher/CTPlayerKit | `DashboardScreen` | Adds `.catalog` tab |
-
-**Execution order rules:**
-1. `base_setup` → `foundation` → `architecture` → `quality`
-2. Catalog module contracts (in registry order)
-3. Service module contracts (in registry order)
-4. `AppTab` always **last**
-
----
-
-## Development
-
-```bash
-# Build
-npm run build
-
-# Watch mode (auto-recompile on save)
 npm run dev
 ```
