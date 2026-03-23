@@ -65,7 +65,8 @@ function execGit(
  * `refs/remotes/origin/<ref>` (detached HEAD is fine for reading files).
  */
 async function fetchAndCheckoutRef(dir: string, ref: string): Promise<void> {
-  const branchSpec = `refs/heads/${ref}:refs/remotes/origin/${ref}`;
+  // '+' allows updating the remote-tracking ref when the remote branch moved (non-FF).
+  const branchSpec = `+refs/heads/${ref}:refs/remotes/origin/${ref}`;
   const remoteTip = `refs/remotes/origin/${ref}`;
 
   try {
@@ -100,10 +101,13 @@ async function fetchAndCheckoutRef(dir: string, ref: string): Promise<void> {
     /* fall through */
   }
 
-  await execGit("git", ["-C", dir, "fetch", "origin"], {
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  await execGit("git", ["-C", dir, "checkout", "--force", ref]);
+  await execGit(
+    "git",
+    ["-C", dir, "fetch", "origin", branchSpec],
+    { maxBuffer: 64 * 1024 * 1024 }
+  );
+  // Bare `git checkout foo/bar` is parsed as ref + pathspec, not a branch name; use the remote tip.
+  await execGit("git", ["-C", dir, "checkout", "--force", remoteTip]);
 }
 
 async function syncGitClone(url: string, ref: string, dir: string): Promise<void> {
